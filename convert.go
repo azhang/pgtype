@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	errors "golang.org/x/xerrors"
 )
 
@@ -392,8 +393,22 @@ var kindTypes map[reflect.Kind]reflect.Type
 //
 // GetAssignToDstType returns the converted dst and a bool representing if any
 // change was made.
+/*
+INFO[0000] GetAssignToDstType dstptr: 0xc000348400
+INFO[0000] GetAssignToDstType dstptr kind: ptr
+INFO[0000] GetAssignToDstType dstptr elem: <nil>
+INFO[0000] GetAssignToDstType dstval: <nil>
+
+INFO[0000] GetAssignToDstType dstptr:
+INFO[0000] GetAssignToDstType dstptr kind: ptr
+INFO[0000] GetAssignToDstType dstptr elem: {{{} [] [] 0xc0000e7040} 0 []   }
+INFO[0000] GetAssignToDstType dstval: {{{} [] [] 0xc0000e7040} 0 []   }
+*/
 func GetAssignToDstType(dst interface{}) (interface{}, bool) {
 	dstPtr := reflect.ValueOf(dst)
+	log.Info("GetAssignToDstType dstptr: ", dstPtr)
+	log.Info("GetAssignToDstType dstptr kind: ", dstPtr.Kind())
+	log.Info("GetAssignToDstType dstptr elem: ", dstPtr.Elem())
 
 	// AssignTo dst must always be a pointer
 	if dstPtr.Kind() != reflect.Ptr {
@@ -401,6 +416,8 @@ func GetAssignToDstType(dst interface{}) (interface{}, bool) {
 	}
 
 	dstVal := dstPtr.Elem()
+	log.Info("GetAssignToDstType dstval: ", dstVal)
+	log.Info("GetAssignToDstType dstval kind: ", dstVal.Kind())
 
 	// if dst is a pointer to pointer, allocate space try again with the dereferenced pointer
 	if dstVal.Kind() == reflect.Ptr {

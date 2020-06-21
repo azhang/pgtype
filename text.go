@@ -3,7 +3,9 @@ package pgtype
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"reflect"
 
+	log "github.com/sirupsen/logrus"
 	errors "golang.org/x/xerrors"
 )
 
@@ -13,6 +15,7 @@ type Text struct {
 }
 
 func (dst *Text) Set(src interface{}) error {
+	log.Info("text Set()")
 	if src == nil {
 		*dst = Text{Status: Null}
 		return nil
@@ -51,6 +54,7 @@ func (dst *Text) Set(src interface{}) error {
 }
 
 func (dst Text) Get() interface{} {
+	log.Info("text Get()")
 	switch dst.Status {
 	case Present:
 		return dst.String
@@ -62,6 +66,8 @@ func (dst Text) Get() interface{} {
 }
 
 func (src *Text) AssignTo(dst interface{}) error {
+	log.Info("text AssignTo()", reflect.TypeOf(dst))
+	log.Info(src.Status)
 	switch src.Status {
 	case Present:
 		switch v := dst.(type) {
@@ -90,12 +96,14 @@ func (Text) PreferredResultFormat() int16 {
 }
 
 func (dst *Text) DecodeText(ci *ConnInfo, src []byte) error {
+	log.Info("text DecodeText()")
 	if src == nil {
 		*dst = Text{Status: Null}
 		return nil
 	}
 
 	*dst = Text{String: string(src), Status: Present}
+	log.Info(dst)
 	return nil
 }
 
@@ -108,6 +116,7 @@ func (Text) PreferredParamFormat() int16 {
 }
 
 func (src Text) EncodeText(ci *ConnInfo, buf []byte) ([]byte, error) {
+	log.Info("text EncodeText()")
 	switch src.Status {
 	case Null:
 		return nil, nil
@@ -124,6 +133,7 @@ func (src Text) EncodeBinary(ci *ConnInfo, buf []byte) ([]byte, error) {
 
 // Scan implements the database/sql Scanner interface.
 func (dst *Text) Scan(src interface{}) error {
+	log.Info("text Scan()")
 	if src == nil {
 		*dst = Text{Status: Null}
 		return nil
@@ -143,6 +153,7 @@ func (dst *Text) Scan(src interface{}) error {
 
 // Value implements the database/sql/driver Valuer interface.
 func (src Text) Value() (driver.Value, error) {
+	log.Info("text Value()")
 	switch src.Status {
 	case Present:
 		return src.String, nil

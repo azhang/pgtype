@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	errors "golang.org/x/xerrors"
 )
 
@@ -367,6 +368,7 @@ func (ci *ConnInfo) InitializeDataTypes(nameOIDs map[string]uint32) {
 }
 
 func (ci *ConnInfo) RegisterDataType(t DataType) {
+	log.Info("RegisterDataType: ", t)
 	t.Value = NewValue(t.Value)
 
 	ci.oidToDataType[t.OID] = &t
@@ -417,11 +419,13 @@ func (ci *ConnInfo) DataTypeForOID(oid uint32) (*DataType, bool) {
 }
 
 func (ci *ConnInfo) DataTypeForName(name string) (*DataType, bool) {
+	log.Info("DataTypeForName", name)
 	dt, ok := ci.nameToDataType[name]
 	return dt, ok
 }
 
 func (ci *ConnInfo) buildReflectTypeToDataType() {
+	log.Info("buildReflectTypeToDataType")
 	ci.reflectTypeToDataType = make(map[reflect.Type]*DataType)
 
 	for _, dt := range ci.oidToDataType {
@@ -440,6 +444,7 @@ func (ci *ConnInfo) buildReflectTypeToDataType() {
 // DataTypeForValue finds a data type suitable for v. Use RegisterDataType to register types that can encode and decode
 // themselves. Use RegisterDefaultPgType to register that can be handled by a registered data type.
 func (ci *ConnInfo) DataTypeForValue(v interface{}) (*DataType, bool) {
+	log.Info("DataTypeForValue")
 	if ci.reflectTypeToDataType == nil {
 		ci.buildReflectTypeToDataType()
 	}
@@ -509,6 +514,7 @@ func (scanPlanDstBinaryDecoder) Scan(ci *ConnInfo, oid uint32, formatCode int16,
 type scanPlanDstTextDecoder struct{}
 
 func (plan scanPlanDstTextDecoder) Scan(ci *ConnInfo, oid uint32, formatCode int16, src []byte, dst interface{}) error {
+	log.Info("TextDecoder Scan")
 	if d, ok := (dst).(TextDecoder); ok {
 		return d.DecodeText(ci, src)
 	}
@@ -520,10 +526,20 @@ func (plan scanPlanDstTextDecoder) Scan(ci *ConnInfo, oid uint32, formatCode int
 type scanPlanDataTypeSQLScanner DataType
 
 func (plan *scanPlanDataTypeSQLScanner) Scan(ci *ConnInfo, oid uint32, formatCode int16, src []byte, dst interface{}) error {
-	scanner, ok := dst.(sql.Scanner)
+	dstptr := dst
+	log.Info("SQLDecoder Scan")
+	/*if reflect.ValueOf(dst).Kind() == reflect.Ptr {
+		if reflect.ValueOf(dst).Elem().Kind() == reflect.Ptr {
+			log.Info("PlanScan: dst is nested pointer")
+			dstptr = reflect.ValueOf(dst).Elem().Interface()
+		}
+	}*/
+
+	scanner, ok := dstptr.(sql.Scanner)
 	if !ok {
-		newPlan := ci.PlanScan(oid, formatCode, dst)
-		return newPlan.Scan(ci, oid, formatCode, src, dst)
+		log.Fatal("SQLDecoder Scan Fail :", reflect.TypeOf(dstptr))
+		newPlan := ci.PlanScan(oid, formatCode, dstptr)
+		return newPlan.Scan(ci, oid, formatCode, src, dstptr)
 	}
 
 	dt := (*DataType)(plan)
@@ -539,6 +555,7 @@ func (plan *scanPlanDataTypeSQLScanner) Scan(ci *ConnInfo, oid uint32, formatCod
 	}
 
 	sqlSrc, err := DatabaseSQLValue(ci, dt.Value)
+	log.Info("sqlSrc: ", sqlSrc)
 	if err != nil {
 		return err
 	}
@@ -593,6 +610,7 @@ func (scanPlanSQLScanner) Scan(ci *ConnInfo, oid uint32, formatCode int16, src [
 type scanPlanReflection struct{}
 
 func (scanPlanReflection) Scan(ci *ConnInfo, oid uint32, formatCode int16, src []byte, dst interface{}) error {
+	log.Info("scanPlanReflection")
 	// We might be given a pointer to something that implements the decoder interface(s),
 	// even though the pointer itself doesn't.
 	refVal := reflect.ValueOf(dst)
@@ -610,6 +628,7 @@ func (scanPlanReflection) Scan(ci *ConnInfo, oid uint32, formatCode int16, src [
 		refVal.Elem().Set(elemPtr)
 
 		plan := ci.PlanScan(oid, formatCode, elemPtr.Interface())
+		log.Info("scanPlanReflection Here", plan)
 		return plan.Scan(ci, oid, formatCode, src, elemPtr.Interface())
 	}
 
@@ -748,6 +767,20 @@ func (scanPlanString) Scan(ci *ConnInfo, oid uint32, formatCode int16, src []byt
 
 // PlanScan prepares a plan to scan a value into dst.
 func (ci *ConnInfo) PlanScan(oid uint32, formatCode int16, dst interface{}) ScanPlan {
+	log.Info("PlanScan: ", reflect.TypeOf(dst))
+	refVal := reflect.ValueOf(dst)
+	if refVal.Kind() == reflect.Ptr && refVal.Type().Elem().Kind() == reflect.Ptr {
+		// We need to allocate an element, and set the destination to it
+		// Then we can retry as that element.
+		elemPtr := reflect.New(refVal.Type().Elem().Elem())
+		refVal.Elem().Set(elemPtr)
+
+
+		return scanPlanReflection{}
+		//return ci.PlanScan(oid, formatCode, elemPtr.Interface())
+	}
+
+	log.Info("PlanScan formatCode: ", formatCode)
 	switch formatCode {
 	case BinaryFormatCode:
 		switch dst.(type) {
@@ -785,12 +818,14 @@ func (ci *ConnInfo) PlanScan(oid uint32, formatCode int16, dst interface{}) Scan
 			return scanPlanDstBinaryDecoder{}
 		}
 	case TextFormatCode:
+		log.Info("PlanScan text format code: ", formatCode, reflect.TypeOf(dst))
 		switch dst.(type) {
 		case *string:
 			return scanPlanString{}
 		case TextDecoder:
 			return scanPlanDstTextDecoder{}
 		}
+		log.Info("PlanScan: nothing matched")
 	}
 
 	var dt *DataType
@@ -805,8 +840,11 @@ func (ci *ConnInfo) PlanScan(oid uint32, formatCode int16, dst interface{}) Scan
 		}
 	}
 
+	log.Printf("dt : %+v\n", dt)
+
 	if dt != nil {
 		if _, ok := dst.(sql.Scanner); ok {
+			log.Info("inside")
 			return (*scanPlanDataTypeSQLScanner)(dt)
 		}
 		return (*scanPlanDataTypeAssignTo)(dt)
@@ -822,6 +860,14 @@ func (ci *ConnInfo) PlanScan(oid uint32, formatCode int16, dst interface{}) Scan
 func (ci *ConnInfo) Scan(oid uint32, formatCode int16, src []byte, dst interface{}) error {
 	if dst == nil {
 		return nil
+	}
+
+	log.Info("Scan: ", reflect.TypeOf(dst))
+	if reflect.ValueOf(dst).Kind() == reflect.Ptr {
+		if reflect.ValueOf(dst).Elem().Kind() == reflect.Ptr {
+			log.Info("Scan: dst is nested pointer")
+			dst = reflect.ValueOf(dst).Elem().Interface()
+		}
 	}
 
 	plan := ci.PlanScan(oid, formatCode, dst)
