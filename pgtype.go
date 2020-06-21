@@ -748,6 +748,17 @@ func (scanPlanString) Scan(ci *ConnInfo, oid uint32, formatCode int16, src []byt
 
 // PlanScan prepares a plan to scan a value into dst.
 func (ci *ConnInfo) PlanScan(oid uint32, formatCode int16, dst interface{}) ScanPlan {
+	refVal := reflect.ValueOf(dst)
+	if refVal.Kind() == reflect.Ptr && refVal.Type().Elem().Kind() == reflect.Ptr {
+		// We need to allocate an element, and set the destination to it
+		// Then we can retry as that element.
+		elemPtr := reflect.New(refVal.Type().Elem().Elem())
+		refVal.Elem().Set(elemPtr)
+
+
+		return scanPlanReflection{}
+	}
+
 	switch formatCode {
 	case BinaryFormatCode:
 		switch dst.(type) {
